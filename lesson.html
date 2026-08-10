@@ -44,7 +44,7 @@ async function init() {
 
   const videoWrap = document.getElementById("videoWrap");
   if (lesson.video_url) {
-    videoWrap.innerHTML = `<iframe class="video" src="${lesson.video_url}" allowfullscreen></iframe>`;
+    videoWrap.innerHTML = `<iframe class="video" src="${toYouTubeEmbed(lesson.video_url)}" allowfullscreen></iframe>`;
   } else {
     videoWrap.innerHTML = `<p class="muted">No video attached to this lesson.</p>`;
   }

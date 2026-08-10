@@ -6,6 +6,20 @@
 <title>Quiz — Word Sanctuary</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+.progress-track { height: 6px; background: #e7e1d6; border-radius: 999px; margin-bottom: 20px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--gold); transition: width 0.25s ease; }
+.q-count { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.quiz-option { position: relative; padding-right: 42px; }
+.quiz-option .tick { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); opacity: 0; font-size: 18px; color: var(--gold); transition: opacity 0.15s ease; }
+.quiz-option.selected .tick { opacity: 1; }
+.overlay { position: fixed; inset: 0; background: rgba(23,18,31,0.55); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+.overlay.show { display: flex; }
+.overlay-card { background: #fff; border-radius: 16px; padding: 24px; max-width: 340px; width: 100%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
+.overlay-card .checkmark { font-size: 40px; color: var(--good); margin-bottom: 8px; }
+.overlay-card h3 { margin-bottom: 4px; }
+.overlay-card p { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+</style>
 </head>
 <body>
 <div class="topbar">
@@ -17,6 +31,15 @@
   <div id="quizBody"><p class="muted">Loading...</p></div>
 </div>
 
+<div class="overlay" id="advanceOverlay">
+  <div class="overlay-card">
+    <div class="checkmark">✓</div>
+    <h3 id="overlayTitle">Answer recorded</h3>
+    <p id="overlaySubtitle">Ready for the next question?</p>
+    <button id="overlayNextBtn">Next Question</button>
+  </div>
+</div>
+
 <script src="supabase-config.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
@@ -25,6 +48,7 @@ let currentUserId = null;
 let questions = [];
 let answers = {}; // questionId -> selectedIndex
 let quizData = null;
+let currentIndex = 0;
 
 async function init() {
   const session = await requireAuth();
@@ -48,48 +72,63 @@ async function init() {
     .order("order_index", { ascending: true });
 
   questions = qs || [];
-  render();
+  renderQuestion();
 }
 
-function render() {
+function renderQuestion() {
   const body = document.getElementById("quizBody");
   if (questions.length === 0) {
     body.innerHTML = "<p class='muted'>No questions in this quiz yet.</p>";
     return;
   }
-  body.innerHTML = "";
-  questions.forEach((q, qi) => {
-    const div = document.createElement("div");
-    div.className = "card";
-    let optsHtml = "";
-    (q.options || []).forEach((opt, oi) => {
-      optsHtml += `<div class="quiz-option" data-q="${q.id}" data-o="${oi}">${opt}</div>`;
-    });
-    div.innerHTML = `<h3>${qi + 1}. ${q.question}</h3>${optsHtml}`;
-    body.appendChild(div);
+  const q = questions[currentIndex];
+  const pct = Math.round(((currentIndex) / questions.length) * 100);
+
+  let optsHtml = "";
+  (q.options || []).forEach((opt, oi) => {
+    optsHtml += `<div class="quiz-option" data-o="${oi}">${opt}<span class="tick">✓</span></div>`;
   });
 
-  const submitBtn = document.createElement("button");
-  submitBtn.textContent = "Submit Quiz";
-  submitBtn.addEventListener("click", submitQuiz);
-  body.appendChild(submitBtn);
+  body.innerHTML = `
+    <div class="q-count">Question ${currentIndex + 1} of ${questions.length}</div>
+    <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+    <div class="card">
+      <h3>${q.question}</h3>
+      ${optsHtml}
+    </div>
+  `;
 
   document.querySelectorAll(".quiz-option").forEach(el => {
     el.addEventListener("click", () => {
-      const qid = el.dataset.q;
-      const oi = parseInt(el.dataset.o);
-      answers[qid] = oi;
-      document.querySelectorAll(`.quiz-option[data-q="${qid}"]`).forEach(o => o.classList.remove("selected"));
+      if (el.classList.contains("selected")) return; // already answered
+      document.querySelectorAll(".quiz-option").forEach(o => o.classList.remove("selected"));
       el.classList.add("selected");
+      answers[q.id] = parseInt(el.dataset.o);
+      setTimeout(showAdvanceOverlay, 250);
     });
   });
 }
 
-async function submitQuiz() {
-  if (Object.keys(answers).length < questions.length) {
-    alert("Please answer all questions before submitting.");
-    return;
+function showAdvanceOverlay() {
+  const isLast = currentIndex === questions.length - 1;
+  document.getElementById("overlaySubtitle").textContent = isLast
+    ? "That was the last question."
+    : "Ready for the next question?";
+  document.getElementById("overlayNextBtn").textContent = isLast ? "Submit Quiz" : "Next Question";
+  document.getElementById("advanceOverlay").classList.add("show");
+}
+
+document.getElementById("overlayNextBtn").addEventListener("click", () => {
+  document.getElementById("advanceOverlay").classList.remove("show");
+  if (currentIndex < questions.length - 1) {
+    currentIndex++;
+    renderQuestion();
+  } else {
+    submitQuiz();
   }
+});
+
+async function submitQuiz() {
   let correct = 0;
   questions.forEach(q => {
     if (answers[q.id] === q.correct_index) correct++;
@@ -106,11 +145,11 @@ async function submitQuiz() {
     passed
   });
 
+  // Score is intentionally not shown to the worker — only admins see results.
   document.getElementById("quizBody").innerHTML = `
-    <div class="card">
-      <h3>${passed ? "You passed! 🎉" : "Not quite there yet"}</h3>
-      <p>Score: ${score}% (${correct}/${questions.length} correct)</p>
-      <span class="badge ${passed ? "" : "fail"}">${passed ? "Passed" : "Failed"}</span>
+    <div class="card" style="text-align:center;">
+      <h3>Quiz submitted 🙏</h3>
+      <p>Thank you for completing this lesson's quiz.</p>
     </div>
     <button onclick="window.location.href='lesson.html?id=${quizData.lessons.id}'">Back to Lesson</button>
   `;

@@ -106,7 +106,7 @@ async function renderLessons(courseId) {
     <button class="secondary" id="backToCourses">← Back to Courses</button>
     <h2>${course.title} — Lessons</h2>
     <input id="newLessonTitle" placeholder="Lesson title">
-    <input id="newLessonVideo" placeholder="YouTube embed URL (https://www.youtube.com/embed/...)">
+    <input id="newLessonVideo" placeholder="Paste any YouTube link (watch, share, or embed)">
     <input id="newLessonOrder" type="number" placeholder="Order (1, 2, 3...)" value="${(lessons?.length || 0) + 1}">
     <button id="addLessonBtn">Add Lesson</button>`;
 
@@ -118,6 +118,7 @@ async function renderLessons(courseId) {
       <button class="secondary manageQuizBtn" data-lesson-id="${l.id}" data-quiz-id="${hasQuiz ? l.quizzes[0].id : ''}">
         ${hasQuiz ? "Manage Quiz" : "Add Quiz"}
       </button>
+      <button class="secondary editVideoBtn" data-lesson-id="${l.id}" data-current="${(l.video_url || '').replace(/"/g,'&quot;')}">Edit Video Link</button>
     </div>`;
   });
   body.innerHTML = html;
@@ -125,11 +126,22 @@ async function renderLessons(courseId) {
   document.getElementById("backToCourses").addEventListener("click", renderCourses);
   document.getElementById("addLessonBtn").addEventListener("click", async () => {
     const title = document.getElementById("newLessonTitle").value.trim();
-    const video_url = document.getElementById("newLessonVideo").value.trim();
+    const video_url = toYouTubeEmbed(document.getElementById("newLessonVideo").value.trim());
     const order_index = parseInt(document.getElementById("newLessonOrder").value) || 1;
     if (!title) return;
     await supabaseClient.from("lessons").insert({ course_id: courseId, title, video_url, order_index });
     renderLessons(courseId);
+  });
+
+  document.querySelectorAll(".editVideoBtn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const newLink = prompt("Paste the new YouTube link:", btn.dataset.current);
+      if (newLink === null) return;
+      await supabaseClient.from("lessons")
+        .update({ video_url: toYouTubeEmbed(newLink.trim()) })
+        .eq("id", btn.dataset.lessonId);
+      renderLessons(courseId);
+    });
   });
 
   document.querySelectorAll(".manageQuizBtn").forEach(btn => {
@@ -211,6 +223,7 @@ async function renderSessions() {
     <select id="sessCourse">${courseOptions}</select>
     <input id="sessTitle" placeholder="Session title (e.g. Week 3 Training)">
     <input id="sessDate" type="date">
+    <input id="sessCode" placeholder="Check-in code (leave blank to auto-generate)" style="text-transform:uppercase; font-family:'JetBrains Mono',monospace;">
     <button id="createSessionBtn">Create Session</button>
     <h2>Sessions</h2>`;
 
@@ -230,8 +243,13 @@ async function renderSessions() {
     const course_id = document.getElementById("sessCourse").value;
     const title = document.getElementById("sessTitle").value.trim();
     const session_date = document.getElementById("sessDate").value || new Date().toISOString().slice(0, 10);
-    const checkin_code = "CW-" + Math.floor(1000 + Math.random() * 9000);
-    await supabaseClient.from("live_sessions").insert({ course_id, title, session_date, checkin_code });
+    const customCode = document.getElementById("sessCode").value.trim().toUpperCase();
+    const checkin_code = customCode || ("CW-" + Math.floor(1000 + Math.random() * 9000));
+    const { error } = await supabaseClient.from("live_sessions").insert({ course_id, title, session_date, checkin_code });
+    if (error) {
+      alert(error.code === "23505" ? "That code is already in use — try another." : "Something went wrong. Try again.");
+      return;
+    }
     renderSessions();
   });
 

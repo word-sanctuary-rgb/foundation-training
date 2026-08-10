@@ -57,14 +57,13 @@ async function init() {
     if (quiz) {
       const { data: attempts } = await supabaseClient
         .from("quiz_attempts")
-        .select("score, passed")
+        .select("id")
         .eq("worker_id", currentUserId)
         .eq("quiz_id", quiz.id)
         .order("attempted_at", { ascending: false })
         .limit(1);
       if (attempts && attempts.length > 0) {
-        const a = attempts[0];
-        statusBadge = `<span class="badge ${a.passed ? "" : "fail"}">${a.passed ? "Passed" : "Failed"} — ${a.score}%</span>`;
+        statusBadge = `<span class="badge">Quiz completed</span>`;
       }
     }
     const div = document.createElement("div");

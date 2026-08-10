@@ -7,7 +7,25 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Redirect to login if not authenticated. Call at top of protected pages.
+// Convert a normal YouTube link (watch, youtu.be, live) into an embeddable URL.
+// If it's already an embed link (or not YouTube), it's returned unchanged.
+function toYouTubeEmbed(url) {
+  if (!url) return url;
+  try {
+    const u = new URL(url.trim());
+    let videoId = null;
+    if (u.hostname.includes("youtu.be")) {
+      videoId = u.pathname.slice(1);
+    } else if (u.hostname.includes("youtube.com")) {
+      if (u.pathname === "/watch") videoId = u.searchParams.get("v");
+      else if (u.pathname.startsWith("/embed/")) return url.trim();
+      else if (u.pathname.startsWith("/live/")) videoId = u.pathname.split("/")[2];
+    }
+    return videoId ? `https://www.youtube.com/embed/${videoId}` : url.trim();
+  } catch (e) {
+    return url.trim();
+  }
+}
 async function requireAuth() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) {
