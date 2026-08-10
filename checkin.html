@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attendance Check-In — Word Sanctuary</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="topbar">
+  <a href="dashboard.html">← Back</a>
+  <span class="signout" id="signoutBtn">Sign Out</span>
+</div>
+<div class="container">
+  <h1>Attendance Check-In</h1>
+  <p class="muted">Enter the code shared during your Word Sanctuary training session.</p>
+  <div id="msgBox"></div>
+  <input type="text" id="codeInput" placeholder="e.g. CW-0472" style="text-transform:uppercase; font-family:'JetBrains Mono',monospace; letter-spacing:0.05em;">
+  <button id="checkinBtn">Check In</button>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+let currentUserId = null;
+
+async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  currentUserId = session.user.id;
+}
+
+document.getElementById("checkinBtn").addEventListener("click", async () => {
+  const msgBox = document.getElementById("msgBox");
+  msgBox.innerHTML = "";
+  const code = document.getElementById("codeInput").value.trim().toUpperCase();
+  if (!code) return;
+
+  const { data: session, error: sessErr } = await supabaseClient
+    .from("live_sessions")
+    .select("*")
+    .eq("checkin_code", code)
+    .eq("active", true)
+    .single();
+
+  if (sessErr || !session) {
+    msgBox.innerHTML = `<p class="error">Invalid or inactive code. Please check with your session leader.</p>`;
+    return;
+  }
+
+  const { error: insertErr } = await supabaseClient.from("attendance").insert({
+    worker_id: currentUserId,
+    session_id: session.id
+  });
+
+  if (insertErr) {
+    if (insertErr.code === "23505") {
+      msgBox.innerHTML = `<p class="success">You're already checked in for "${session.title}".</p>`;
+    } else {
+      msgBox.innerHTML = `<p class="error">Something went wrong. Try again.</p>`;
+    }
+    return;
+  }
+
+  msgBox.innerHTML = `<p class="success">Checked in for "${session.title}"! ✅</p>`;
+  document.getElementById("codeInput").value = "";
+});
+
+init();
+</script>
+</body>
+</html>

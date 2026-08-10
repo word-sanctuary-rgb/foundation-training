@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson — Word Sanctuary</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="topbar">
+  <a href="#" id="backLink">← Back</a>
+  <span class="signout" id="signoutBtn">Sign Out</span>
+</div>
+<div class="container">
+  <h1 id="lessonTitle">Loading...</h1>
+  <div id="videoWrap"></div>
+  <div id="quizWrap" style="margin-top:20px;"></div>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const lessonId = params.get("id");
+let currentUserId = null;
+
+async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  currentUserId = session.user.id;
+
+  if (!lessonId) { document.getElementById("lessonTitle").textContent = "Lesson not found"; return; }
+
+  const { data: lesson } = await supabaseClient
+    .from("lessons")
+    .select("*, quizzes(id)")
+    .eq("id", lessonId)
+    .single();
+
+  if (!lesson) { document.getElementById("lessonTitle").textContent = "Lesson not found"; return; }
+
+  document.getElementById("lessonTitle").textContent = lesson.title;
+  document.getElementById("backLink").href = `course.html?id=${lesson.course_id}`;
+
+  const videoWrap = document.getElementById("videoWrap");
+  if (lesson.video_url) {
+    videoWrap.innerHTML = `<iframe class="video" src="${lesson.video_url}" allowfullscreen></iframe>`;
+  } else {
+    videoWrap.innerHTML = `<p class="muted">No video attached to this lesson.</p>`;
+  }
+
+  const quiz = lesson.quizzes?.[0];
+  const quizWrap = document.getElementById("quizWrap");
+  if (quiz) {
+    quizWrap.innerHTML = `<button onclick="window.location.href='quiz.html?id=${quiz.id}'">Take Quiz</button>`;
+  } else {
+    quizWrap.innerHTML = `<p class="muted">No quiz for this lesson.</p>`;
+  }
+}
+
+document.getElementById("signoutBtn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut();
+  window.location.href = "login.html";
+});
+
+init();
+</script>
+</body>
+</html>

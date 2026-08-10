@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Word Sanctuary — Foundation Training</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="hero">
+  <div class="eyebrow">Word Sanctuary</div>
+  <h1>Foundation Training</h1>
+  <p>Equipping every worker to serve with knowledge, skill, and the Word.</p>
+  <div class="rule"></div>
+</div>
+
+<div class="container" style="padding-top:0;">
+  <div class="auth-card">
+    <h1 id="formTitle" style="font-size:20px;">Sign In</h1>
+    <p class="muted" id="formSubtitle">Enter your details to continue.</p>
+
+    <div id="errorBox" class="error" style="display:none;"></div>
+    <div id="successBox" class="success" style="display:none;"></div>
+
+    <div id="nameField" style="display:none;">
+      <input type="text" id="fullName" placeholder="Full name">
+    </div>
+    <input type="email" id="email" placeholder="Email">
+    <input type="password" id="password" placeholder="Password">
+    <button id="submitBtn">Sign In</button>
+    <button class="secondary" id="toggleModeBtn">Need an account? Sign up</button>
+  </div>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+let mode = "signin"; // or "signup"
+
+const formTitle = document.getElementById("formTitle");
+const formSubtitle = document.getElementById("formSubtitle");
+const nameField = document.getElementById("nameField");
+const submitBtn = document.getElementById("submitBtn");
+const toggleModeBtn = document.getElementById("toggleModeBtn");
+const errorBox = document.getElementById("errorBox");
+const successBox = document.getElementById("successBox");
+
+toggleModeBtn.addEventListener("click", () => {
+  mode = mode === "signin" ? "signup" : "signin";
+  if (mode === "signup") {
+    formTitle.textContent = "Create Account";
+    formSubtitle.textContent = "Register as a worker to start training.";
+    nameField.style.display = "block";
+    submitBtn.textContent = "Sign Up";
+    toggleModeBtn.textContent = "Already have an account? Sign in";
+  } else {
+    formTitle.textContent = "Sign In";
+    formSubtitle.textContent = "Enter your details to continue.";
+    nameField.style.display = "none";
+    submitBtn.textContent = "Sign In";
+    toggleModeBtn.textContent = "Need an account? Sign up";
+  }
+  errorBox.style.display = "none";
+  successBox.style.display = "none";
+});
+
+submitBtn.addEventListener("click", async () => {
+  errorBox.style.display = "none";
+  successBox.style.display = "none";
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+
+  if (!email || !password) {
+    errorBox.textContent = "Please fill in email and password.";
+    errorBox.style.display = "block";
+    return;
+  }
+
+  submitBtn.disabled = true;
+
+  if (mode === "signup") {
+    const fullName = document.getElementById("fullName").value.trim();
+    if (!fullName) {
+      errorBox.textContent = "Please enter your full name.";
+      errorBox.style.display = "block";
+      submitBtn.disabled = false;
+      return;
+    }
+    const { data, error } = await supabaseClient.auth.signUp({
+      email, password,
+      options: { data: { full_name: fullName } }
+    });
+    if (error) {
+      errorBox.textContent = error.message;
+      errorBox.style.display = "block";
+      submitBtn.disabled = false;
+      return;
+    }
+    successBox.textContent = "Account created! You can now sign in.";
+    successBox.style.display = "block";
+    // If email confirmation is off, session exists immediately
+    if (data.session) {
+      window.location.href = "dashboard.html";
+      return;
+    }
+  } else {
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) {
+      errorBox.textContent = error.message;
+      errorBox.style.display = "block";
+      submitBtn.disabled = false;
+      return;
+    }
+    window.location.href = "dashboard.html";
+    return;
+  }
+  submitBtn.disabled = false;
+});
+
+// If already logged in, skip straight to dashboard
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session) window.location.href = "dashboard.html";
+})();
+</script>
+</body>
+</html>

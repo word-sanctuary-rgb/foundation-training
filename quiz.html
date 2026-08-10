@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quiz — Word Sanctuary</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="topbar">
+  <a href="#" id="backLink">← Back</a>
+  <span class="signout" id="signoutBtn">Sign Out</span>
+</div>
+<div class="container">
+  <h1>Quiz</h1>
+  <div id="quizBody"><p class="muted">Loading...</p></div>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const quizId = params.get("id");
+let currentUserId = null;
+let questions = [];
+let answers = {}; // questionId -> selectedIndex
+let quizData = null;
+
+async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  currentUserId = session.user.id;
+
+  if (!quizId) { document.getElementById("quizBody").innerHTML = "<p class='muted'>Quiz not found.</p>"; return; }
+
+  const { data: quiz } = await supabaseClient
+    .from("quizzes")
+    .select("*, lessons(id, course_id)")
+    .eq("id", quizId)
+    .single();
+  quizData = quiz;
+  document.getElementById("backLink").href = `lesson.html?id=${quiz.lessons.id}`;
+
+  const { data: qs } = await supabaseClient
+    .from("quiz_questions")
+    .select("*")
+    .eq("quiz_id", quizId)
+    .order("order_index", { ascending: true });
+
+  questions = qs || [];
+  render();
+}
+
+function render() {
+  const body = document.getElementById("quizBody");
+  if (questions.length === 0) {
+    body.innerHTML = "<p class='muted'>No questions in this quiz yet.</p>";
+    return;
+  }
+  body.innerHTML = "";
+  questions.forEach((q, qi) => {
+    const div = document.createElement("div");
+    div.className = "card";
+    let optsHtml = "";
+    (q.options || []).forEach((opt, oi) => {
+      optsHtml += `<div class="quiz-option" data-q="${q.id}" data-o="${oi}">${opt}</div>`;
+    });
+    div.innerHTML = `<h3>${qi + 1}. ${q.question}</h3>${optsHtml}`;
+    body.appendChild(div);
+  });
+
+  const submitBtn = document.createElement("button");
+  submitBtn.textContent = "Submit Quiz";
+  submitBtn.addEventListener("click", submitQuiz);
+  body.appendChild(submitBtn);
+
+  document.querySelectorAll(".quiz-option").forEach(el => {
+    el.addEventListener("click", () => {
+      const qid = el.dataset.q;
+      const oi = parseInt(el.dataset.o);
+      answers[qid] = oi;
+      document.querySelectorAll(`.quiz-option[data-q="${qid}"]`).forEach(o => o.classList.remove("selected"));
+      el.classList.add("selected");
+    });
+  });
+}
+
+async function submitQuiz() {
+  if (Object.keys(answers).length < questions.length) {
+    alert("Please answer all questions before submitting.");
+    return;
+  }
+  let correct = 0;
+  questions.forEach(q => {
+    if (answers[q.id] === q.correct_index) correct++;
+  });
+  const score = Math.round((correct / questions.length) * 100);
+  const passed = score >= (quizData.pass_threshold || 70);
+
+  await supabaseClient.from("quiz_attempts").insert({
+    worker_id: currentUserId,
+    quiz_id: quizId,
+    score,
+    correct_count: correct,
+    total_questions: questions.length,
+    passed
+  });
+
+  document.getElementById("quizBody").innerHTML = `
+    <div class="card">
+      <h3>${passed ? "You passed! 🎉" : "Not quite there yet"}</h3>
+      <p>Score: ${score}% (${correct}/${questions.length} correct)</p>
+      <span class="badge ${passed ? "" : "fail"}">${passed ? "Passed" : "Failed"}</span>
+    </div>
+    <button onclick="window.location.href='lesson.html?id=${quizData.lessons.id}'">Back to Lesson</button>
+  `;
+}
+
+document.getElementById("signoutBtn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut();
+  window.location.href = "login.html";
+});
+
+init();
+</script>
+</body>
+</html>

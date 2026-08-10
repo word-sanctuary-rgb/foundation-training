@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Word Sanctuary</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="topbar">
+  <a href="dashboard.html">← Back</a>
+  <span class="signout" id="signoutBtn">Sign Out</span>
+</div>
+<div class="container">
+  <h1>Admin</h1>
+  <div class="tabs">
+    <button data-tab="courses">Courses</button>
+    <button data-tab="sessions">Live Sessions</button>
+    <button data-tab="attendance">Attendance</button>
+    <button data-tab="performance">Quiz Performance</button>
+  </div>
+  <div id="tabBody"></div>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+let adminSession = null;
+let activeTab = "courses";
+
+async function init() {
+  const result = await requireAdmin();
+  if (!result) return;
+  adminSession = result.session;
+  bindTabs();
+  renderTab();
+}
+
+function bindTabs() {
+  document.querySelectorAll(".tabs button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeTab = btn.dataset.tab;
+      updateTabStyles();
+      renderTab();
+    });
+  });
+  updateTabStyles();
+}
+function updateTabStyles() {
+  document.querySelectorAll(".tabs button").forEach(btn => {
+    btn.classList.toggle("inactive", btn.dataset.tab !== activeTab);
+  });
+}
+
+async function renderTab() {
+  const body = document.getElementById("tabBody");
+  body.innerHTML = "<p class='muted'>Loading...</p>";
+  if (activeTab === "courses") await renderCourses();
+  else if (activeTab === "sessions") await renderSessions();
+  else if (activeTab === "attendance") await renderAttendance();
+  else if (activeTab === "performance") await renderPerformance();
+}
+
+// ---------------- COURSES / LESSONS / QUIZZES ----------------
+async function renderCourses() {
+  const body = document.getElementById("tabBody");
+  const { data: courses } = await supabaseClient.from("courses").select("*").order("created_at");
+
+  let html = `
+    <h2>Add Course</h2>
+    <input id="newCourseTitle" placeholder="Course title">
+    <textarea id="newCourseDesc" placeholder="Description" rows="2"></textarea>
+    <button id="addCourseBtn">Add Course</button>
+    <h2>Courses</h2>`;
+
+  (courses || []).forEach(c => {
+    html += `<div class="card">
+      <h3>${c.title}</h3>
+      <p>${c.description || ""}</p>
+      <button class="secondary manageBtn" data-course-id="${c.id}">Manage Lessons</button>
+    </div>`;
+  });
+  body.innerHTML = html;
+
+  document.getElementById("addCourseBtn").addEventListener("click", async () => {
+    const title = document.getElementById("newCourseTitle").value.trim();
+    const description = document.getElementById("newCourseDesc").value.trim();
+    if (!title) return;
+    await supabaseClient.from("courses").insert({ title, description });
+    renderCourses();
+  });
+
+  document.querySelectorAll(".manageBtn").forEach(btn => {
+    btn.addEventListener("click", () => renderLessons(btn.dataset.courseId));
+  });
+}
+
+async function renderLessons(courseId) {
+  const body = document.getElementById("tabBody");
+  const { data: course } = await supabaseClient.from("courses").select("*").eq("id", courseId).single();
+  const { data: lessons } = await supabaseClient
+    .from("lessons").select("*, quizzes(id)")
+    .eq("course_id", courseId).order("order_index");
+
+  let html = `
+    <button class="secondary" id="backToCourses">← Back to Courses</button>
+    <h2>${course.title} — Lessons</h2>
+    <input id="newLessonTitle" placeholder="Lesson title">
+    <input id="newLessonVideo" placeholder="YouTube embed URL (https://www.youtube.com/embed/...)">
+    <input id="newLessonOrder" type="number" placeholder="Order (1, 2, 3...)" value="${(lessons?.length || 0) + 1}">
+    <button id="addLessonBtn">Add Lesson</button>`;
+
+  (lessons || []).forEach(l => {
+    const hasQuiz = l.quizzes && l.quizzes.length > 0;
+    html += `<div class="card">
+      <h3>${l.order_index}. ${l.title}</h3>
+      <p>${l.video_url || "No video"}</p>
+      <button class="secondary manageQuizBtn" data-lesson-id="${l.id}" data-quiz-id="${hasQuiz ? l.quizzes[0].id : ''}">
+        ${hasQuiz ? "Manage Quiz" : "Add Quiz"}
+      </button>
+    </div>`;
+  });
+  body.innerHTML = html;
+
+  document.getElementById("backToCourses").addEventListener("click", renderCourses);
+  document.getElementById("addLessonBtn").addEventListener("click", async () => {
+    const title = document.getElementById("newLessonTitle").value.trim();
+    const video_url = document.getElementById("newLessonVideo").value.trim();
+    const order_index = parseInt(document.getElementById("newLessonOrder").value) || 1;
+    if (!title) return;
+    await supabaseClient.from("lessons").insert({ course_id: courseId, title, video_url, order_index });
+    renderLessons(courseId);
+  });
+
+  document.querySelectorAll(".manageQuizBtn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      let quizId = btn.dataset.quizId;
+      if (!quizId) {
+        const { data } = await supabaseClient.from("quizzes")
+          .insert({ lesson_id: btn.dataset.lessonId, pass_threshold: 70 })
+          .select().single();
+        quizId = data.id;
+      }
+      renderQuizEditor(quizId, courseId);
+    });
+  });
+}
+
+async function renderQuizEditor(quizId, courseId) {
+  const body = document.getElementById("tabBody");
+  const { data: quiz } = await supabaseClient.from("quizzes").select("*").eq("id", quizId).single();
+  const { data: questions } = await supabaseClient
+    .from("quiz_questions").select("*").eq("quiz_id", quizId).order("order_index");
+
+  let html = `
+    <button class="secondary" id="backToLessons">← Back to Lessons</button>
+    <h2>Quiz Questions</h2>
+    <p class="muted">Pass threshold: ${quiz.pass_threshold}%</p>
+    <div class="card">
+      <input id="qText" placeholder="Question text">
+      <input id="qOpt0" placeholder="Option A">
+      <input id="qOpt1" placeholder="Option B">
+      <input id="qOpt2" placeholder="Option C (optional)">
+      <input id="qOpt3" placeholder="Option D (optional)">
+      <select id="qCorrect">
+        <option value="0">Correct: A</option>
+        <option value="1">Correct: B</option>
+        <option value="2">Correct: C</option>
+        <option value="3">Correct: D</option>
+      </select>
+      <button id="addQuestionBtn">Add Question</button>
+    </div>`;
+
+  (questions || []).forEach((q, i) => {
+    html += `<div class="card"><h3>${i + 1}. ${q.question}</h3><p>Options: ${(q.options || []).join(", ")}</p><p>Correct: ${q.options[q.correct_index]}</p></div>`;
+  });
+  body.innerHTML = html;
+
+  document.getElementById("backToLessons").addEventListener("click", () => renderLessons(courseId));
+  document.getElementById("addQuestionBtn").addEventListener("click", async () => {
+    const question = document.getElementById("qText").value.trim();
+    const opts = [
+      document.getElementById("qOpt0").value.trim(),
+      document.getElementById("qOpt1").value.trim(),
+      document.getElementById("qOpt2").value.trim(),
+      document.getElementById("qOpt3").value.trim(),
+    ].filter(o => o.length > 0);
+    const correct_index = parseInt(document.getElementById("qCorrect").value);
+    if (!question || opts.length < 2 || correct_index >= opts.length) {
+      alert("Please provide a question, at least 2 options, and a valid correct answer.");
+      return;
+    }
+    await supabaseClient.from("quiz_questions").insert({
+      quiz_id: quizId, question, options: opts, correct_index, order_index: (questions?.length || 0) + 1
+    });
+    renderQuizEditor(quizId, courseId);
+  });
+}
+
+// ---------------- LIVE SESSIONS ----------------
+async function renderSessions() {
+  const body = document.getElementById("tabBody");
+  const { data: courses } = await supabaseClient.from("courses").select("id, title");
+  const { data: sessions } = await supabaseClient
+    .from("live_sessions").select("*, courses(title)").order("created_at", { ascending: false });
+
+  let courseOptions = (courses || []).map(c => `<option value="${c.id}">${c.title}</option>`).join("");
+
+  let html = `
+    <h2>Create Live Session</h2>
+    <select id="sessCourse">${courseOptions}</select>
+    <input id="sessTitle" placeholder="Session title (e.g. Week 3 Training)">
+    <input id="sessDate" type="date">
+    <button id="createSessionBtn">Create Session</button>
+    <h2>Sessions</h2>`;
+
+  (sessions || []).forEach(s => {
+    html += `<div class="card">
+      <h3>${s.title || "Untitled"} — ${s.courses?.title || ""}</h3>
+      <p style="margin-bottom:8px;">${s.session_date} · ${s.active ? "Active" : "Closed"}</p>
+      <span class="ticket-code">${s.checkin_code}</span>
+      <button class="secondary toggleActiveBtn" data-id="${s.id}" data-active="${s.active}">
+        ${s.active ? "Close Session" : "Reopen Session"}
+      </button>
+    </div>`;
+  });
+  body.innerHTML = html;
+
+  document.getElementById("createSessionBtn").addEventListener("click", async () => {
+    const course_id = document.getElementById("sessCourse").value;
+    const title = document.getElementById("sessTitle").value.trim();
+    const session_date = document.getElementById("sessDate").value || new Date().toISOString().slice(0, 10);
+    const checkin_code = "CW-" + Math.floor(1000 + Math.random() * 9000);
+    await supabaseClient.from("live_sessions").insert({ course_id, title, session_date, checkin_code });
+    renderSessions();
+  });
+
+  document.querySelectorAll(".toggleActiveBtn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const isActive = btn.dataset.active === "true";
+      await supabaseClient.from("live_sessions").update({ active: !isActive }).eq("id", btn.dataset.id);
+      renderSessions();
+    });
+  });
+}
+
+// ---------------- ATTENDANCE ----------------
+async function renderAttendance() {
+  const body = document.getElementById("tabBody");
+  const { data: sessions } = await supabaseClient
+    .from("live_sessions").select("*, courses(title)").order("created_at", { ascending: false });
+
+  let html = `<h2>Attendance by Session</h2>`;
+  for (const s of sessions || []) {
+    const { data: records } = await supabaseClient
+      .from("attendance")
+      .select("checked_in_at, profiles(full_name)")
+      .eq("session_id", s.id);
+    html += `<div class="card">
+      <h3>${s.title || "Untitled"} — ${s.courses?.title || ""}</h3>
+      <p class="muted">${s.session_date} · <span class="ticket-code" style="font-size:11.5px; padding:2px 8px;">${s.checkin_code}</span> · ${(records || []).length} checked in</p>
+      <table><tr><th>Name</th><th>Time</th></tr>`;
+    (records || []).forEach(r => {
+      html += `<tr><td>${r.profiles?.full_name || "Unknown"}</td><td>${new Date(r.checked_in_at).toLocaleString()}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+  body.innerHTML = html || "<p class='muted'>No sessions yet.</p>";
+}
+
+// ---------------- QUIZ PERFORMANCE ----------------
+async function renderPerformance() {
+  const body = document.getElementById("tabBody");
+  const { data: attempts } = await supabaseClient
+    .from("quiz_attempts")
+    .select("score, passed, correct_count, total_questions, attempted_at, profiles(full_name), quizzes(lessons(title, courses(title)))")
+    .order("attempted_at", { ascending: false });
+
+  let html = `<h2>Quiz Performance (all attempts)</h2>`;
+  if (!attempts || attempts.length === 0) {
+    html += `<p class="muted">No quiz attempts yet.</p>`;
+  } else {
+    html += `<table><tr><th>Worker</th><th>Course/Lesson</th><th>Score</th><th>Result</th></tr>`;
+    attempts.forEach(a => {
+      const lessonTitle = a.quizzes?.lessons?.title || "";
+      const courseTitle = a.quizzes?.lessons?.courses?.title || "";
+      html += `<tr>
+        <td>${a.profiles?.full_name || "Unknown"}</td>
+        <td>${courseTitle} / ${lessonTitle}</td>
+        <td>${a.score}% (${a.correct_count}/${a.total_questions})</td>
+        <td>${a.passed ? "✅ Passed" : "❌ Failed"}</td>
+      </tr>`;
+    });
+    html += `</table>`;
+
+    // Per-worker average
+    const byWorker = {};
+    attempts.forEach(a => {
+      const name = a.profiles?.full_name || "Unknown";
+      if (!byWorker[name]) byWorker[name] = [];
+      byWorker[name].push(a.score);
+    });
+    html += `<h2>Average Score by Worker</h2><table><tr><th>Worker</th><th>Avg Score</th><th>Attempts</th></tr>`;
+    Object.entries(byWorker).forEach(([name, scores]) => {
+      const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+      html += `<tr><td>${name}</td><td>${avg}%</td><td>${scores.length}</td></tr>`;
+    });
+    html += `</table>`;
+  }
+  body.innerHTML = html;
+}
+
+document.getElementById("signoutBtn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut();
+  window.location.href = "login.html";
+});
+
+init();
+</script>
+</body>
+</html>

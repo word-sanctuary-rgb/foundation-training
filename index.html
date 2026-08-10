@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workers Training</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script>
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  window.location.href = session ? "dashboard.html" : "login.html";
+})();
+</script>
+</head>
+<body>
+<p style="font-family:sans-serif;text-align:center;margin-top:60px;">Loading...</p>
+</body>
+</html>

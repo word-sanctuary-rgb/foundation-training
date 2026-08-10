@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Training — Word Sanctuary</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="topbar">
+  <a href="dashboard.html" class="brand">
+    <span class="eyebrow">Word Sanctuary</span>
+    <span class="name">Foundation Training</span>
+  </a>
+  <span class="right">
+    <a href="checkin.html">Check In</a>
+    <span class="signout" id="signoutBtn">Sign Out</span>
+  </span>
+</div>
+<div class="container">
+  <h1>Welcome<span id="welcomeName"></span></h1>
+  <p class="muted">Your enrolled courses and available courses.</p>
+
+  <h2>My Courses</h2>
+  <div id="myCourses"><p class="muted">Loading...</p></div>
+
+  <h2>Available Courses</h2>
+  <div id="availableCourses"><p class="muted">Loading...</p></div>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+let currentUserId = null;
+
+async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  currentUserId = session.user.id;
+
+  const profile = await getProfile(currentUserId);
+  document.getElementById("welcomeName").textContent = profile?.full_name ? `, ${profile.full_name}` : "";
+
+  await loadCourses();
+}
+
+async function loadCourses() {
+  const { data: enrollments } = await supabaseClient
+    .from("enrollments")
+    .select("course_id, courses(id, title, description)")
+    .eq("worker_id", currentUserId);
+
+  const enrolledIds = new Set((enrollments || []).map(e => e.course_id));
+
+  const { data: allCourses } = await supabaseClient
+    .from("courses")
+    .select("id, title, description")
+    .order("created_at", { ascending: true });
+
+  // My courses with progress
+  const myCoursesEl = document.getElementById("myCourses");
+  if (!enrollments || enrollments.length === 0) {
+    myCoursesEl.innerHTML = `<p class="muted">You're not enrolled in any courses yet.</p>`;
+  } else {
+    myCoursesEl.innerHTML = "";
+    for (const e of enrollments) {
+      const course = e.courses;
+      const progress = await getCourseProgress(course.id);
+      const div = document.createElement("div");
+      div.className = "card";
+      div.innerHTML = `
+        <a href="course.html?id=${course.id}">
+          <h3>${course.title}</h3>
+          <p>${course.description || ""}</p>
+          <span class="badge">${progress.completed}/${progress.total} lessons quizzed</span>
+        </a>`;
+      myCoursesEl.appendChild(div);
+    }
+  }
+
+  // Available (not enrolled) courses
+  const availableEl = document.getElementById("availableCourses");
+  const available = (allCourses || []).filter(c => !enrolledIds.has(c.id));
+  if (available.length === 0) {
+    availableEl.innerHTML = `<p class="muted">No other courses available right now.</p>`;
+  } else {
+    availableEl.innerHTML = "";
+    available.forEach(course => {
+      const div = document.createElement("div");
+      div.className = "card";
+      div.innerHTML = `
+        <h3>${course.title}</h3>
+        <p>${course.description || ""}</p>
+        <button data-course-id="${course.id}" class="enrollBtn">Enroll</button>`;
+      availableEl.appendChild(div);
+    });
+    document.querySelectorAll(".enrollBtn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        await supabaseClient.from("enrollments").insert({
+          worker_id: currentUserId,
+          course_id: btn.dataset.courseId
+        });
+        await loadCourses();
+      });
+    });
+  }
+}
+
+async function getCourseProgress(courseId) {
+  const { data: lessons } = await supabaseClient
+    .from("lessons")
+    .select("id, quizzes(id)")
+    .eq("course_id", courseId);
+
+  const total = (lessons || []).length;
+  let completed = 0;
+  for (const lesson of lessons || []) {
+    const quiz = lesson.quizzes?.[0];
+    if (!quiz) continue;
+    const { data: attempts } = await supabaseClient
+      .from("quiz_attempts")
+      .select("id")
+      .eq("worker_id", currentUserId)
+      .eq("quiz_id", quiz.id)
+      .limit(1);
+    if (attempts && attempts.length > 0) completed++;
+  }
+  return { completed, total };
+}
+
+document.getElementById("signoutBtn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut();
+  window.location.href = "login.html";
+});
+
+init();
+</script>
+</body>
+</html>

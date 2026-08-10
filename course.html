@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Course — Word Sanctuary</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="topbar">
+  <a href="dashboard.html">← Back</a>
+  <span class="signout" id="signoutBtn">Sign Out</span>
+</div>
+<div class="container">
+  <h1 id="courseTitle">Loading...</h1>
+  <p class="muted" id="courseDesc"></p>
+  <h2>Lessons</h2>
+  <div id="lessonList"><p class="muted">Loading...</p></div>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const courseId = params.get("id");
+let currentUserId = null;
+
+async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  currentUserId = session.user.id;
+
+  if (!courseId) { document.getElementById("courseTitle").textContent = "Course not found"; return; }
+
+  const { data: course } = await supabaseClient.from("courses").select("*").eq("id", courseId).single();
+  if (!course) { document.getElementById("courseTitle").textContent = "Course not found"; return; }
+
+  document.getElementById("courseTitle").textContent = course.title;
+  document.getElementById("courseDesc").textContent = course.description || "";
+
+  const { data: lessons } = await supabaseClient
+    .from("lessons")
+    .select("id, title, order_index, quizzes(id)")
+    .eq("course_id", courseId)
+    .order("order_index", { ascending: true });
+
+  const listEl = document.getElementById("lessonList");
+  if (!lessons || lessons.length === 0) {
+    listEl.innerHTML = `<p class="muted">No lessons yet.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = "";
+  for (const lesson of lessons) {
+    const quiz = lesson.quizzes?.[0];
+    let statusBadge = "";
+    if (quiz) {
+      const { data: attempts } = await supabaseClient
+        .from("quiz_attempts")
+        .select("score, passed")
+        .eq("worker_id", currentUserId)
+        .eq("quiz_id", quiz.id)
+        .order("attempted_at", { ascending: false })
+        .limit(1);
+      if (attempts && attempts.length > 0) {
+        const a = attempts[0];
+        statusBadge = `<span class="badge ${a.passed ? "" : "fail"}">${a.passed ? "Passed" : "Failed"} — ${a.score}%</span>`;
+      }
+    }
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `
+      <a href="lesson.html?id=${lesson.id}">
+        <h3>${lesson.title}</h3>
+        ${statusBadge}
+      </a>`;
+    listEl.appendChild(div);
+  }
+}
+
+document.getElementById("signoutBtn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut();
+  window.location.href = "login.html";
+});
+
+init();
+</script>
+</body>
+</html>
